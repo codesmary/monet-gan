@@ -10,7 +10,10 @@ import numpy as np
 import cv2
 
 def decode_image(features):
-    transform = transforms.ToTensor()
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=256/2, std=256/2) #scale to [-1,1]
+    ])
     image = cv2.imdecode(features["image"], -1)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = Image.fromarray(image, "RGB")
@@ -53,6 +56,6 @@ if __name__ == '__main__':
     for i in range(25):
         im = batch[i]
         subplot(5,5,i+1)
-        imshow(F.to_pil_image(im))
+        imshow(F.to_pil_image(im * (256/2) + (256/2)))
         axis('off')
     show()
