@@ -1,5 +1,5 @@
 import torch
-
+import torch.nn.functional as F
 
 class DownBlock(torch.nn.Module):
     def __init__(self, input, output, stride=1, dropout=0, pool=False, apply_norm=True):
@@ -64,17 +64,17 @@ class Generator(torch.nn.Module):
 
         self.up_stack = [
             UpBlock(layers[3], layers[3], stride=stride, dropout=0.5, apply_norm=False), # (bs, 2, 2, 1024)
-            UpBlock(layers[3], layers[3], stride=stride, dropout=0.5), # (bs, 4, 4, 1024)
-            UpBlock(layers[3], layers[3], stride=stride, dropout=0.5), # (bs, 8, 8, 1024)
-            UpBlock(layers[3], layers[3], stride=stride), # (bs, 16, 16, 1024)
-            UpBlock(layers[3], layers[2], stride=stride), # (bs, 32, 32, 512)
-            UpBlock(layers[2], layers[1], stride=stride), # (bs, 64, 64, 256)
-            UpBlock(layers[1], layers[0], stride=stride) # (bs, 128, 128, 128)
+            UpBlock(layers[3]*2, layers[3], stride=stride, dropout=0.5), # (bs, 4, 4, 1024)
+            UpBlock(layers[3]*2, layers[3], stride=stride, dropout=0.5), # (bs, 8, 8, 1024)
+            UpBlock(layers[3]*2, layers[3], stride=stride), # (bs, 16, 16, 1024)
+            UpBlock(layers[3]*2, layers[2], stride=stride), # (bs, 32, 32, 512)
+            UpBlock(layers[2]*2, layers[1], stride=stride), # (bs, 64, 64, 256)
+            UpBlock(layers[1]*2, layers[0], stride=stride) # (bs, 128, 128, 128)
         ]
 
         L =[]
         L.append(torch.nn.Tanh())
-        L.append(torch.nn.ConvTranspose2d(layers[0], channels, kernel_size=3, padding=1, output_padding=1, stride=stride))
+        L.append(torch.nn.ConvTranspose2d(layers[0]*2, channels, kernel_size=3, padding=1, output_padding=1, stride=stride))
 
         self.last = torch.nn.Sequential(*L) # (bs, 256, 256, 3)
 
@@ -85,10 +85,11 @@ class Generator(torch.nn.Module):
             skips.append(x)
 
         skips = reversed(skips[:-1])
+        save = None
 
         for layer, skip in zip(self.up_stack, skips):
             x = layer(x)
-            x = torch.cat([x, skip])
+            x = torch.cat((x, skip), dim=1)
         
         x = self.last(x)
         
@@ -114,4 +115,6 @@ class Discriminator(torch.nn.Module):
     
     def forward(self, x):
         out = self.network(x)
-        return self.classifier(out)
+        x = self.classifier(out)
+
+        return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
