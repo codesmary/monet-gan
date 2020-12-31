@@ -122,8 +122,8 @@ def train(args):
             optimizer_D_B.step()
 
             global_step += 1
-            if global_step % 100 == 0:
-                log(train_logger, images={'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B})
+            if global_step % 10 == 0:
+                log(train_logger, {'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B}, global_step)
 
         # Update learning rates
         lr_scheduler_G.step()
@@ -136,7 +136,7 @@ def train(args):
         torch.save(netD_A.state_dict(), 'output/netD_A.pth')
         torch.save(netD_B.state_dict(), 'output/netD_B.pth')
 
-def log(logger, images):
+def log(logger, images, global_step):
     logger.add_images('real_A', images["real_A"][:4], global_step)
     logger.add_images('real_B', images["real_B"][:4], global_step)
     logger.add_images('fake_A', images["fake_A"][:4], global_step)
