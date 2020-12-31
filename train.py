@@ -12,6 +12,10 @@ import torch.utils.tensorboard as tb
 #https://github.com/aitorzip/PyTorch-CycleGAN
 #TODO logger
 def train(args):
+    train_logger = None
+    if args.log_dir is not None:
+        train_logger = tb.SummaryWriter(path.join(args.log_dir, 'train'), flush_secs=1)
+
     netG_A2B = Generator().to(args.device)
     netG_B2A = Generator().to(args.device)
 
@@ -43,9 +47,11 @@ def train(args):
     monet_dataset = load_monet_data(batch_size=args.batch_size)
 
     dataloader = zip(photo_dataset, monet_dataset)
+    global_step = 0
 
     for epoch in range(args.epoch, args.epochs):
         for i, (photo, monet) in enumerate(dataloader):
+            print("gs", global_step)
             real_A = Variable(input_A.copy_(photo))
             real_B = Variable(input_B.copy_(monet))
 
@@ -115,6 +121,10 @@ def train(args):
 
             optimizer_D_B.step()
 
+            global_step += 1
+            if global_step % 100 == 0:
+                log(train_logger, images={'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B})
+
         # Update learning rates
         lr_scheduler_G.step()
         lr_scheduler_D_A.step()
@@ -126,6 +136,12 @@ def train(args):
         torch.save(netD_A.state_dict(), 'output/netD_A.pth')
         torch.save(netD_B.state_dict(), 'output/netD_B.pth')
 
+def log(logger, images):
+    logger.add_images('real_A', images["real_A"][:4], global_step)
+    logger.add_images('real_B', images["real_B"][:4], global_step)
+    logger.add_images('fake_A', images["fake_A"][:4], global_step)
+    logger.add_images('fake_B', images["fake_B"][:4], global_step)
+
 if __name__ == '__main__':
     import argparse
 
@@ -135,7 +151,7 @@ if __name__ == '__main__':
     parser.add_argument('--learningrate', type=float, default=0.05)
     parser.add_argument('--epoch', type=int, default=0) #starting epoch
     parser.add_argument('--decay_epoch', type=int, default=10) #epoch to start linearly decaying the learning rate to 0
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--device', type=str, default='cpu')
 
