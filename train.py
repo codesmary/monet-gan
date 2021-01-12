@@ -8,9 +8,10 @@ from pylab import show, imshow, subplot, axis, title
 from torchvision.transforms import functional as F
 from torch.autograd import Variable
 import torch.utils.tensorboard as tb
+from torch.utils.data import DataLoader
+
 
 #https://github.com/aitorzip/PyTorch-CycleGAN
-#TODO logger
 def train(args):
     train_logger = None
     if args.log_dir is not None:
@@ -30,6 +31,19 @@ def train(args):
     optimizer_D_A = torch.optim.Adam(netD_A.parameters(), lr=args.learningrate, betas=(0.5, 0.999))
     optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=args.learningrate, betas=(0.5, 0.999))
 
+    if args.continue_training:
+        checkpoint = torch.load(path.join(path.dirname(path.abspath(__file__)), 'models.th'))
+
+        netG_A2B.load_state_dict(checkpoint['netG_A2B'])
+        netG_B2A.load_state_dict(checkpoint['netG_B2A'])
+
+        netD_A.load_state_dict(checkpoint['netD_A'])
+        netD_B.load_state_dict(checkpoint['netD_B'])
+
+        optimizer_G.load_state_dict(checkpoint['optimizer_G'])
+        optimizer_D_A.load_state_dict(checkpoint['optimizer_D_A'])
+        optimizer_D_B.load_state_dict(checkpoint['optimizer_D_B'])
+
     lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=LambdaLR(args.epochs, args.epoch, args.decay_epoch).step)
     lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(args.epochs, args.epoch, args.decay_epoch).step)
     lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=LambdaLR(args.epochs, args.epoch, args.decay_epoch).step)
@@ -43,15 +57,21 @@ def train(args):
     fake_A_buffer = ReplayBuffer()
     fake_B_buffer = ReplayBuffer()
 
-    photo_dataset = load_photo_data(batch_size=args.batch_size)
-    monet_dataset = load_monet_data(batch_size=args.batch_size)
+    photo_iterator = iter(load_photo_data(batch_size=args.batch_size))
+    monet_iterator = iter(load_monet_data(batch_size=args.batch_size))
 
-    dataloader = zip(photo_dataset, monet_dataset)
     global_step = 0
 
     for epoch in range(args.epoch, args.epochs):
-        for i, (photo, monet) in enumerate(dataloader):
-            print("gs", global_step)
+        for i, photo in enumerate(photo_iterator):
+            # print("gs", global_step)
+
+            try:
+                monet = next(monet_iterator)
+            except StopIteration:
+                monet_iterator = iter(load_monet_data(batch_size=args.batch_size))
+                monet = next(monet_iterator)
+
             real_A = Variable(input_A.copy_(photo))
             real_B = Variable(input_B.copy_(monet))
 
@@ -82,6 +102,8 @@ def train(args):
             # Total loss
             loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
             loss_G.backward()
+
+            print(loss_G.item())
             
             optimizer_G.step()
 
@@ -122,25 +144,31 @@ def train(args):
             optimizer_D_B.step()
 
             global_step += 1
-            if global_step % 10 == 0:
-                log(train_logger, {'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B}, global_step)
+            log(train_logger, {'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B}, global_step)
+
+            save_models(netG_A2B, netG_B2A, netD_A, netD_B, optimizer_G, optimizer_D_A, optimizer_D_B)
 
         # Update learning rates
         lr_scheduler_G.step()
         lr_scheduler_D_A.step()
         lr_scheduler_D_B.step()
-
-        # Save models checkpoints
-        torch.save(netG_A2B.state_dict(), 'output/netG_A2B.pth')
-        torch.save(netG_B2A.state_dict(), 'output/netG_B2A.pth')
-        torch.save(netD_A.state_dict(), 'output/netD_A.pth')
-        torch.save(netD_B.state_dict(), 'output/netD_B.pth')
-
+        
 def log(logger, images, global_step):
-    logger.add_images('real_A', images["real_A"][:4], global_step)
-    logger.add_images('real_B', images["real_B"][:4], global_step)
-    logger.add_images('fake_A', images["fake_A"][:4], global_step)
-    logger.add_images('fake_B', images["fake_B"][:4], global_step)
+    logger.add_images('real_A', images["real_A"][:4] * (256/2) + (256/2), global_step)
+    logger.add_images('real_B', images["real_B"][:4] * (256/2) + (256/2), global_step)
+    logger.add_images('fake_A', images["fake_A"][:4] * (256/2) + (256/2), global_step)
+    logger.add_images('fake_B', images["fake_B"][:4] * (256/2) + (256/2), global_step)
+
+def save_models(netG_A2B, netG_B2A, netD_A, netD_B, optimizer_G, optimizer_D_A, optimizer_D_B):
+    torch.save({
+            'netG_A2B': netG_A2B.state_dict(),
+            'netG_B2A': netG_B2A.state_dict(),
+            'netD_A': netD_A.state_dict(),
+            'netD_B': netD_B.state_dict(),
+            'optimizer_G': optimizer_G.state_dict(),
+            'optimizer_D_A': optimizer_D_A.state_dict(),
+            'optimizer_D_B': optimizer_D_B.state_dict()
+            }, path.join(path.dirname(path.abspath(__file__)), 'models.th'))
 
 if __name__ == '__main__':
     import argparse
@@ -152,8 +180,9 @@ if __name__ == '__main__':
     parser.add_argument('--epoch', type=int, default=0) #starting epoch
     parser.add_argument('--decay_epoch', type=int, default=10) #epoch to start linearly decaying the learning rate to 0
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--device', type=str, default='cpu')
+    parser.add_argument('--continue_training', type=bool, default=False)
 
     args = parser.parse_args()
     train(args)
